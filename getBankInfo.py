@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+debug_this = False
 
 def get_access_token():
     """Authenticate with the MyPonto OAuth2 API"""
@@ -14,6 +15,7 @@ def get_access_token():
     try:
         client_id = os.getenv("MY_PONTO_ID")
         client_secret = os.getenv("MY_PONTO_SECRET")
+        my_ponto_url = os.getenv("MY_PONTO_URL")
         
         if not client_id or not client_secret:
             raise ValueError("Missing MY_PONTO_ID or MY_PONTO_SECRET in environment variables")
@@ -29,7 +31,7 @@ def get_access_token():
         }
         
         response = requests.post(
-            "https://api.myponto.com/oauth2/token",
+            f"{my_ponto_url}/oauth2/token",
             headers=headers,
             data={"grant_type": "client_credentials"}
         )
@@ -39,7 +41,10 @@ def get_access_token():
         
         data = response.json()
         print("Login successful")
-        print(f"Access Token: {data.get('access_token')}")
+        
+        if debug_this:
+            print(f"Access Token: {data.get('access_token')}")
+            
         return data
     except Exception as error:
         print(f"Login error: {error}")
@@ -51,7 +56,8 @@ def get_bank_account_details(access_token):
     """Get bank account details"""
     print("Getting bank account details...")
     try:
-       
+        my_ponto_url = os.getenv("MY_PONTO_URL")
+        
         if not access_token:
             raise ValueError("Missing access token")
         
@@ -61,7 +67,7 @@ def get_bank_account_details(access_token):
         }
         
         response = requests.get(
-            "https://api.myponto.com/accounts",
+            f"{my_ponto_url}/accounts",
             headers=headers,
             data={"grant_type": "client_credentials"}
         )
@@ -71,7 +77,10 @@ def get_bank_account_details(access_token):
         
         data = response.json()
         print("Get Bank Account Details successful")
-        print(json.dumps(data, indent=2))
+        
+        if debug_this:
+            print(json.dumps(data, indent=2))
+            
         return data
     except Exception as error:
         print(f"Error getting bank account details: {error}")
@@ -98,8 +107,11 @@ def get_account_transactions(access_token, account_id):
             raise Exception(f"Failed to get transactions: {response.status_code} {response.text}")
         
         data = response.json()
-        print(f"Transactions for account {account_id}:")
-        print(json.dumps(data, indent=2))
+        print(f"Transactions count : {len(data.get('data', []))}")
+        
+        if debug_this:
+            print(json.dumps(data, indent=2))
+            
         return data
     except Exception as error:
         print(f"Error getting transactions: {error}")
