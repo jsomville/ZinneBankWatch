@@ -1,5 +1,7 @@
+from datetime import datetime
 import os
 import json
+import re
 import base64
 import requests
 from dotenv import load_dotenv
@@ -7,7 +9,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+pattern = r'^\d{3}-\d{4}-\d{5}$'
+pattern_fulldigit = r'^\d{12}$'
+
 debug_this = False
+debug_transactions = False
 
 def get_access_token():
     """Authenticate with the MyPonto OAuth2 API"""
@@ -130,23 +136,267 @@ def get_account_id(bank_details, iban):
         print(f"Error finding account ID: {error}")
         raise
 
+def process_transactions(transactions):
+    """Process transactions and extract relevant information"""
+    print("Processing transactions...")
+    try:
+        processed = []
+        counter = 0
+        for transaction in transactions.get("data", []):
+            
+            processed_transaction = process_transaction(transaction)
+            if processed_transaction["status"] == "success":
+                processed.append(processed_transaction)
+                
+            if debug_transactions:
+                print(f"Processed transaction: {json.dumps(processed_transaction, indent=2)}")
+                
+            counter += 1
+            
+        print(f"Processed {len(processed)} transactions")
+        return processed
+    except Exception as error:
+        print(f"Error processing transactions: {error}")
+        raise
+
+def process_transaction(transaction):
+    """Process a single transaction and extract relevant information"""
+    try:
+        attributes = transaction.get("attributes", {})
+        
+        transaction_result = {
+            "status": "",
+        }
+        
+        #Check Id
+        id = transaction.get("id")
+        if id is None:
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Missing transaction ID"
+            return transaction_result
+        transaction_result["id"] = id
+        
+        #Check Amount
+        amount = attributes.get("amount")
+        if amount is None or amount <= 0:
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Invalid amount"
+            return transaction_result
+        transaction_result["amount"] = amount
+        
+        #Check Currency
+        currency = attributes.get("currency")
+        if currency != "EUR":
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Invalid currency"
+            return transaction_result
+        transaction_result["currency"] = currency
+        
+        #Check description
+        description = ""
+        description_temp = attributes.get("remittanceInformation", "")
+        if (description_temp is None):
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Missing remittance information"
+            return transaction_result
+        if re.match(pattern, description_temp):
+            #Pattern Match - OK
+            description=description_temp
+        elif re.match(pattern_fulldigit, description_temp):
+            #Is full digit - OK - Format it to the pattern
+            description = f"{description_temp[:3]}-{description_temp[3:7]}-{description_temp[7:]}"
+        else:
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Invalid remittance information"
+            return transaction_result
+        transaction_result["description"] = description
+        
+        #Check date
+        date_str = attributes.get("executionDate")
+        if date_str is None:
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Missing date"
+            return transaction_result
+        try:
+            date_json = json.dumps(date_str)
+            date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        except ValueError:
+            print(f"Invalid date format: {date_str}")
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Invalid date format"
+            return transaction_result
+        transaction_result["date"] = date.isoformat()
+        
+        
+        #Set transaction succeded
+        transaction_result["status"] = "success"
+        transaction_result["field.reftranseuro"]= f" {date.date()}/{description}/{amount:.2f}"
+        transaction_result["field.sourceEuro"]= "Virement Bancaire"
+        
+        return transaction_result
+    except Exception as error:
+        print(f"Error processing transaction: {error}")
+        raise
+    
+def test_process_transaction(transaction_data, testNumber, expected_result):
+    """Test the process_transaction function with given data and expected result"""
+    try:
+        result = process_transaction(transaction_data)
+        if result["status"] == "success" and expected_result == True:
+            print(f"Test {testNumber} passed")
+            return True
+        
+        if result["status"] == "failed" and expected_result == False:
+            print(f"Test {testNumber} passed")
+            return True
+        
+        if result["status"] == "failed" and expected_result == True:
+            print(f"Test {testNumber} failed: Expected success, got {result}")
+            return False
+        
+        if result["status"] == "success" and expected_result == False:
+            print(f"Test {testNumber} failed: Expected failure, got {result}")
+            return False
+
+    except Exception as error:
+        print(f"Error in test_process_transaction: {error}")
+
 def main():
     """Main function"""
     try:
-        access_token = get_access_token()
-        if (access_token):
+        print("getBankInfo - Main - Testing process")
+        test_ok = True
+        test_count = 0
         
-            bank_detail = get_bank_account_details(access_token)
-        
-            bank_id = os.getenv("BANK_ACCOUNT_IBAN")
-            account_id = get_account_id(bank_detail, bank_id)
-        
-            transactions = get_account_transactions(access_token, account_id)
-        
-        print("Bank watch completed successfully")
-    except Exception as error:
-        print(f"Error in bank watch: {error}")
+        #Test - OK
+        test_count+=1
+        test_data = {
+            "id": "12345",
+            "attributes": {
+                "amount": 100.0,
+                "currency": "EUR",
+                "remittanceInformation": "123-4567-89012",
+                "executionDate": "2024-06-01T23:00:00.000Z"
+            }
+        }
+        r = test_process_transaction(test_data, test_count, True)
+        if not r:
+            test_ok = False
 
+        
+        # Test - OK with full digit remittance information
+        test_count+=1
+        test_data = { 
+            "id": "12345",
+            "attributes": {
+                "amount": 100.0,
+                "currency": "EUR",
+                "remittanceInformation": "123456789012",
+                "executionDate": "2024-06-01T23:00:00.000Z"
+            }
+        }
+        r = test_process_transaction(test_data, test_count, True)
+        if not r:
+            test_ok = False
+        
+        #Test - Not ok
+        test_count+=1
+        test_data = {
+            "id": "12345",
+            "attributes": {
+                "amount": 100.0,
+                "currency": "EUR",
+                "remittanceInformation": "",
+                "executionDate": "2024-06-01T23:00:00.000Z"
+            }
+        }
+        r = test_process_transaction(test_data, test_count, False)
+        if not r:
+            test_ok = False
+        
+        #Test - Not ok
+        test_count+=1
+        test_data = {
+            "id": "12345",
+            "attributes": {
+                "amount": 100.0,
+                "currency": "EUR",
+                "remittanceInformation": "12-123-154556",
+                "executionDate": "2024-06-01T23:00:00.000Z"
+            }
+        }
+        r = test_process_transaction(test_data, test_count, False)
+        if not r:
+            test_ok = False
+            
+        #Test - Not ok
+        test_count+=1
+        test_data = {
+            "id": "12345",
+            "attributes": {
+                "amount": 100.0,
+                "currency": "EUR",
+                "remittanceInformation": "A12-123-154556",
+                "executionDate": "2024-06-01"
+            }
+        }
+        r = test_process_transaction(test_data, test_count, False)
+        if not r:
+            test_ok = False
+        
+        #Test - Not ok negative amount
+        test_count+=1
+        test_data = {
+            "id": "12345",
+            "attributes": {
+                "amount": -100.0,
+                "currency": "EUR",
+                "remittanceInformation": "112-123-154556",
+                "executionDate": "2024-06-01T23:00:00.000Z"
+            }
+        }
+        r = test_process_transaction(test_data, test_count, False)
+        if not r:
+            test_ok = False
+    
+        #Test - Not ok date only
+        test_count+=1
+        test_data = {
+            "id": "12345",
+            "attributes": {
+                "amount": 0,
+                "currency": "EUR",
+                "remittanceInformation": "112-123-154556",
+                "executionDate": "2024-06-01"
+            }
+        }
+        r = test_process_transaction(test_data, test_count, False)
+        if not r:
+            test_ok = False
+        
+        #Test - Not ok date + time no TZ
+        test_count+=1
+        test_data = {
+            "id": "12345",
+            "attributes": {
+                "amount": 0,
+                "currency": "EUR",
+                "remittanceInformation": "112-123-154556",
+                "executionDate": "2024-06-01T23:00:00"
+            }
+        }
+        r = test_process_transaction(test_data, test_count, False)
+        if not r:
+            test_ok = False
+
+
+        
+        if test_ok:
+            print("getBankInfo - Tests completed successfully")
+        else:
+            print("getBankInfo - Tests completed with errors")
+    except Exception as error:
+        print(f"getBankInfo - Error: {error}")
 
 if __name__ == "__main__":
     main()
