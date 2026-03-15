@@ -1,0 +1,17 @@
+[
+  {
+    "id": "123456789123465789",
+    "display": "Lastname - Firstname",
+    "email": "email@gmail.com",
+    "account_number": "123-1234-12345",
+    "account_type": "Emission.Credit..."
+  },
+
+  {
+    "id": "223456789123465789",
+    "display": "Lastname - Firstname",
+    "email": "email2@gmail.com",
+    "account_number": "123-1234-12345",
+    "account_type": "Emission.Credit..."
+  }
+]
