@@ -137,3 +137,9 @@ lerna-debug.log*
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+#Local files
+unprocessed_transaction*
+user_list.json
+bank_watch.log
+last_processed_transaction_id.txt

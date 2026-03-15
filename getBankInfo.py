@@ -1,10 +1,13 @@
 from datetime import datetime
+
 import os
 import json
 import re
 import base64
+import traceback
 import requests
 from dotenv import load_dotenv
+from logger import log_this, config_logging
 
 # Load environment variables from .env file
 load_dotenv()
@@ -13,11 +16,11 @@ pattern = r'^\d{3}-\d{4}-\d{5}$'
 pattern_fulldigit = r'^\d{12}$'
 
 debug_this = False
-debug_transactions = False
+debug_transactions = True
 
 def get_access_token():
     """Authenticate with the MyPonto OAuth2 API"""
-    print("Logging in...")
+    log_this("info", "Logging in...")
     try:
         client_id = os.getenv("MY_PONTO_ID")
         client_secret = os.getenv("MY_PONTO_SECRET")
@@ -46,21 +49,23 @@ def get_access_token():
             raise Exception(f"Login failed: {response.status_code} {response.text}")
         
         data = response.json()
-        print("Login successful")
         
         if debug_this:
             print(f"Access Token: {data.get('access_token')}")
             
         return data
     except Exception as error:
-        print(f"Login error: {error}")
+        message = json.dumps({
+            "error": str(error),
+            "traceback": traceback.format_exc().splitlines()
+        }, indent=2)
+        log_this("error", f"Login error: {message}")
         raise
-    
     
 
 def get_bank_account_details(access_token):
     """Get bank account details"""
-    print("Getting bank account details...")
+    log_this("info", "Getting bank account details...")
     try:
         my_ponto_url = os.getenv("MY_PONTO_URL")
         
@@ -82,19 +87,22 @@ def get_bank_account_details(access_token):
             raise Exception(f"Login failed: {response.status_code} {response.text}")
         
         data = response.json()
-        print("Get Bank Account Details successful")
         
         if debug_this:
             print(json.dumps(data, indent=2))
             
         return data
     except Exception as error:
-        print(f"Error getting bank account details: {error}")
+        message = json.dumps({
+            "error": str(error),
+            "traceback": traceback.format_exc().splitlines()
+        }, indent=2)
+        log_this("error", f"Error getting bank account details: {message}")
         raise
     
 def get_account_transactions(access_token, account_id):
     """Get transactions for a specific bank account"""
-    print(f"Getting transactions for account {account_id}...")
+    log_this("info", f"Getting transactions for account {account_id}...")
     try:
         if not access_token:
             raise ValueError("Missing access token")
@@ -113,32 +121,39 @@ def get_account_transactions(access_token, account_id):
             raise Exception(f"Failed to get transactions: {response.status_code} {response.text}")
         
         data = response.json()
-        print(f"Transactions count : {len(data.get('data', []))}")
         
-        if debug_this:
+        if debug_transactions:
             print(json.dumps(data, indent=2))
             
         return data
     except Exception as error:
-        print(f"Error getting transactions: {error}")
+        message = json.dumps({
+            "error": str(error),
+            "traceback": traceback.format_exc().splitlines()
+        }, indent=2)
+        log_this("error", f"Error getting transactions: {message}")
         raise
 
 def get_account_id(bank_details, iban):
     """Get account ID from bank details using IBAN"""
-    print(f"Finding account ID for IBAN {iban}...")
+    log_this("info", f"Finding account ID for IBAN {iban}...")
     try:
         for account in bank_details.get("data", []):
             if account.get("attributes", {}).get("reference") == iban:
-                print(f"Found account ID: {account.get('id')}")
+                if debug_this:
+                    print(f"Found account ID: {account.get('id')}")
                 return account.get("id")
         raise ValueError(f"No account found with IBAN {iban}")
     except Exception as error:
-        print(f"Error finding account ID: {error}")
+        message = json.dumps({
+            "error": str(error),
+            "traceback": traceback.format_exc().splitlines()
+        }, indent=2)
+        log_this("error", f"Error finding account ID:: {message}")
         raise
 
 def process_transactions(transactions):
     """Process transactions and extract relevant information"""
-    print("Processing transactions...")
     try:
         processed = []
         counter = 0
@@ -152,11 +167,14 @@ def process_transactions(transactions):
                 print(f"Processed transaction: {json.dumps(processed_transaction, indent=2)}")
                 
             counter += 1
-            
-        print(f"Processed {len(processed)} transactions")
+        
         return processed
     except Exception as error:
-        print(f"Error processing transactions: {error}")
+        message = json.dumps({
+            "error": str(error),
+            "traceback": traceback.format_exc().splitlines()
+        }, indent=2)
+        log_this("error", f"Error processing transactions: {message}")
         raise
 
 def process_transaction(transaction):
@@ -176,6 +194,22 @@ def process_transaction(transaction):
             return transaction_result
         transaction_result["id"] = id
         
+        #Check date
+        date_str = attributes.get("executionDate")
+        if date_str is None:
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Missing date"
+            return transaction_result
+        try:
+            date_json = json.dumps(date_str)
+            date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        except ValueError:
+            log_this("error", f"Invalid date format: {date_str}")
+            transaction_result["status"] = "failed"
+            transaction_result["reason"] = "Invalid date format"
+            return transaction_result
+        transaction_result["date"] = date.isoformat()
+        
         #Check Amount
         amount = attributes.get("amount")
         if amount is None or amount <= 0:
@@ -192,6 +226,8 @@ def process_transaction(transaction):
             return transaction_result
         transaction_result["currency"] = currency
         
+
+        
         #Check description
         description = ""
         description_temp = attributes.get("remittanceInformation", "")
@@ -199,43 +235,27 @@ def process_transaction(transaction):
             transaction_result["status"] = "failed"
             transaction_result["reason"] = "Missing remittance information"
             return transaction_result
-        if re.match(pattern, description_temp):
-            #Pattern Match - OK
-            description=description_temp
-        elif re.match(pattern_fulldigit, description_temp):
-            #Is full digit - OK - Format it to the pattern
-            description = f"{description_temp[:3]}-{description_temp[3:7]}-{description_temp[7:]}"
-        else:
+        #Remove non digit characters
+        cleaned_description_temp = re.sub(r'\D', '', description_temp)
+        if len(cleaned_description_temp) != 12:
             transaction_result["status"] = "failed"
             transaction_result["reason"] = "Invalid remittance information"
             return transaction_result
+        description = f"{cleaned_description_temp[:3]}-{cleaned_description_temp[3:7]}-{cleaned_description_temp[7:]}"
         transaction_result["description"] = description
-        
-        #Check date
-        date_str = attributes.get("executionDate")
-        if date_str is None:
-            transaction_result["status"] = "failed"
-            transaction_result["reason"] = "Missing date"
-            return transaction_result
-        try:
-            date_json = json.dumps(date_str)
-            date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-        except ValueError:
-            print(f"Invalid date format: {date_str}")
-            transaction_result["status"] = "failed"
-            transaction_result["reason"] = "Invalid date format"
-            return transaction_result
-        transaction_result["date"] = date.isoformat()
-        
         
         #Set transaction succeded
         transaction_result["status"] = "success"
-        transaction_result["field.reftranseuro"]= f" {date.date()}/{description}/{amount:.2f}"
+        transaction_result["field.reftranseuro"]= f"{date.date()}/{description}/{amount:.2f}"
         transaction_result["field.sourceEuro"]= "Virement Bancaire"
         
         return transaction_result
     except Exception as error:
-        print(f"Error processing transaction: {error}")
+        message = json.dumps({
+            "error": str(error),
+            "traceback": traceback.format_exc().splitlines()
+        }, indent=2)
+        log_this("error", f"Error processing transaction: {message}")
         raise
     
 def test_process_transaction(transaction_data, testNumber, expected_result):
@@ -261,140 +281,190 @@ def test_process_transaction(transaction_data, testNumber, expected_result):
     except Exception as error:
         print(f"Error in test_process_transaction: {error}")
 
+def execute_test_cases():
+    print("getBankInfo - Main - Testing process")
+    test_ok = True
+    test_count = 0
+    
+    #Test - OK
+    test_count+=1
+    test_data = {
+        "id": "12345",
+        "attributes": {
+            "amount": 100.0,
+            "currency": "EUR",
+            "remittanceInformation": "123-4567-89012",
+            "executionDate": "2024-06-01T23:00:00.000Z"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, True)
+    if not r:
+        test_ok = False
+
+    
+    # Test - OK with full digit remittance information
+    test_count+=1
+    test_data = { 
+        "id": "12345",
+        "attributes": {
+            "amount": 100.0,
+            "currency": "EUR",
+            "remittanceInformation": "123456789012",
+            "executionDate": "2024-06-01T23:00:00.000Z"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, True)
+    if not r:
+        test_ok = False
+        
+    # Test - OK with full digit with slash
+    test_count+=1
+    test_data = { 
+        "id": "12345",
+        "attributes": {
+            "amount": 100.0,
+            "currency": "EUR",
+            "remittanceInformation": "123/4567/89012",
+            "executionDate": "2024-06-01T23:00:00.000Z"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, True)
+    if not r:
+        test_ok = False
+        
+    # Test - OK with full digit with underscore
+    test_count+=1
+    test_data = { 
+        "id": "12345",
+        "attributes": {
+            "amount": 100.0,
+            "currency": "EUR",
+            "remittanceInformation": "123_4567_89012",
+            "executionDate": "2024-06-01T23:00:00.000Z"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, True)
+    if not r:
+        test_ok = False
+    
+    # Test - OK with full digit with space
+    test_count+=1
+    test_data = { 
+        "id": "12345",
+        "attributes": {
+            "amount": 100.0,
+            "currency": "EUR",
+            "remittanceInformation": "123 4567 89012",
+            "executionDate": "2024-06-01T23:00:00.000Z"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, True)
+    if not r:
+        test_ok = False
+    
+    #Test - Not ok missing remitance
+    test_count+=1
+    test_data = {
+        "id": "12345",
+        "attributes": {
+            "amount": 100.0,
+            "currency": "EUR",
+            "remittanceInformation": "",
+            "executionDate": "2024-06-01T23:00:00.000Z"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, False)
+    if not r:
+        test_ok = False
+    
+    #Test - Not ok remotance format
+    test_count+=1
+    test_data = {
+        "id": "12345",
+        "attributes": {
+            "amount": 100.0,
+            "currency": "EUR",
+            "remittanceInformation": "12-123-154556",
+            "executionDate": "2024-06-01T23:00:00.000Z"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, False)
+    if not r:
+        test_ok = False
+        
+    #Test - Not ok
+    test_count+=1
+    test_data = {
+        "id": "12345",
+        "attributes": {
+            "amount": 100.0,
+            "currency": "EUR",
+            "remittanceInformation": "A12-123-154556",
+            "executionDate": "2024-06-01"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, False)
+    if not r:
+        test_ok = False
+    
+    #Test - Not ok negative amount
+    test_count+=1
+    test_data = {
+        "id": "12345",
+        "attributes": {
+            "amount": -100.0,
+            "currency": "EUR",
+            "remittanceInformation": "112-123-154556",
+            "executionDate": "2024-06-01T23:00:00.000Z"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, False)
+    if not r:
+        test_ok = False
+
+    #Test - Not ok date only
+    test_count+=1
+    test_data = {
+        "id": "12345",
+        "attributes": {
+            "amount": 0,
+            "currency": "EUR",
+            "remittanceInformation": "112-123-154556",
+            "executionDate": "2024-06-01"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, False)
+    if not r:
+        test_ok = False
+    
+    #Test - Not ok date + time no TZ
+    test_count+=1
+    test_data = {
+        "id": "12345",
+        "attributes": {
+            "amount": 0,
+            "currency": "EUR",
+            "remittanceInformation": "112-123-154556",
+            "executionDate": "2024-06-01T23:00:00"
+        }
+    }
+    r = test_process_transaction(test_data, test_count, False)
+    if not r:
+        test_ok = False
+
+    if test_ok:
+        print("getBankInfo - Tests completed successfully")
+    else:
+        print("getBankInfo - Tests completed with errors")
+
 def main():
     """Main function"""
     try:
-        print("getBankInfo - Main - Testing process")
-        test_ok = True
-        test_count = 0
+        config_logging()
         
-        #Test - OK
-        test_count+=1
-        test_data = {
-            "id": "12345",
-            "attributes": {
-                "amount": 100.0,
-                "currency": "EUR",
-                "remittanceInformation": "123-4567-89012",
-                "executionDate": "2024-06-01T23:00:00.000Z"
-            }
-        }
-        r = test_process_transaction(test_data, test_count, True)
-        if not r:
-            test_ok = False
-
+        execute_test_cases()
         
-        # Test - OK with full digit remittance information
-        test_count+=1
-        test_data = { 
-            "id": "12345",
-            "attributes": {
-                "amount": 100.0,
-                "currency": "EUR",
-                "remittanceInformation": "123456789012",
-                "executionDate": "2024-06-01T23:00:00.000Z"
-            }
-        }
-        r = test_process_transaction(test_data, test_count, True)
-        if not r:
-            test_ok = False
         
-        #Test - Not ok
-        test_count+=1
-        test_data = {
-            "id": "12345",
-            "attributes": {
-                "amount": 100.0,
-                "currency": "EUR",
-                "remittanceInformation": "",
-                "executionDate": "2024-06-01T23:00:00.000Z"
-            }
-        }
-        r = test_process_transaction(test_data, test_count, False)
-        if not r:
-            test_ok = False
-        
-        #Test - Not ok
-        test_count+=1
-        test_data = {
-            "id": "12345",
-            "attributes": {
-                "amount": 100.0,
-                "currency": "EUR",
-                "remittanceInformation": "12-123-154556",
-                "executionDate": "2024-06-01T23:00:00.000Z"
-            }
-        }
-        r = test_process_transaction(test_data, test_count, False)
-        if not r:
-            test_ok = False
-            
-        #Test - Not ok
-        test_count+=1
-        test_data = {
-            "id": "12345",
-            "attributes": {
-                "amount": 100.0,
-                "currency": "EUR",
-                "remittanceInformation": "A12-123-154556",
-                "executionDate": "2024-06-01"
-            }
-        }
-        r = test_process_transaction(test_data, test_count, False)
-        if not r:
-            test_ok = False
-        
-        #Test - Not ok negative amount
-        test_count+=1
-        test_data = {
-            "id": "12345",
-            "attributes": {
-                "amount": -100.0,
-                "currency": "EUR",
-                "remittanceInformation": "112-123-154556",
-                "executionDate": "2024-06-01T23:00:00.000Z"
-            }
-        }
-        r = test_process_transaction(test_data, test_count, False)
-        if not r:
-            test_ok = False
-    
-        #Test - Not ok date only
-        test_count+=1
-        test_data = {
-            "id": "12345",
-            "attributes": {
-                "amount": 0,
-                "currency": "EUR",
-                "remittanceInformation": "112-123-154556",
-                "executionDate": "2024-06-01"
-            }
-        }
-        r = test_process_transaction(test_data, test_count, False)
-        if not r:
-            test_ok = False
-        
-        #Test - Not ok date + time no TZ
-        test_count+=1
-        test_data = {
-            "id": "12345",
-            "attributes": {
-                "amount": 0,
-                "currency": "EUR",
-                "remittanceInformation": "112-123-154556",
-                "executionDate": "2024-06-01T23:00:00"
-            }
-        }
-        r = test_process_transaction(test_data, test_count, False)
-        if not r:
-            test_ok = False
-
-
-        
-        if test_ok:
-            print("getBankInfo - Tests completed successfully")
-        else:
-            print("getBankInfo - Tests completed with errors")
     except Exception as error:
         print(f"getBankInfo - Error: {error}")
 
