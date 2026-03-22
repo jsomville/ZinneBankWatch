@@ -143,3 +143,5 @@ unprocessed_transaction*
 user_list.json
 bank_watch.log
 last_processed_transaction_id.txt
+data*
+log*
