@@ -15,6 +15,14 @@ Note:
 TO CHECK:
   - Transaction order is wrong --> we might need to invert it to process older transaction first and then the newest
 
+## create a virtual env
+
+```back
+  python3 -m venv .venv
+  source .venv/bin/activate
+  pip install -r requirements.txt
+```
+
 ## Env File
 Create a .env file containign the following
 

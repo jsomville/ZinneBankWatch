@@ -186,7 +186,7 @@ def get_user_details(user):
 
     return user_detail
 
-def update_user_list():
+def create_user_list():
 
     # Step 1 get all the users
     data = get_all_users()
@@ -231,7 +231,7 @@ def get_user_info_from_account(account):
         # Checks if file exists, if not update the user list and save file
         if not os.path.exists(user_file_path):
             log_this("info", "File not found, creating user file this will take some time")
-            update_user_list()
+            create_user_list()
 
         # Open file & Load File
         with open(user_file_path, "r") as f:
@@ -242,9 +242,27 @@ def get_user_info_from_account(account):
         if user["account_number"] == account:
             return user
 
-    # Account not found
+    #User not found check if e need to update the list
+    data = get_all_users()
+    if len(data) != len(global_user_list):
+        log_this("info", "User list is outdated, updating user list")
+        
+        # Search for the account number again
+        for user in data:
+            #Is the user in the global list
+            user_in_global_list = next((u for u in global_user_list if u["id
+            if user["email"] == account:
+    
     return None
 
+def get_user_info_from_email(email):
+    global global_user_list
+    
+    for user in global_user_list:
+        if user["email"] == email:
+            return user
+
+    return None
 
 def process_payment(production_flag, unique_number, amount, account_number, transaction_dateTime):
     try:
@@ -343,4 +361,4 @@ if __name__ == "__main__":
     # last_user = data[-1:]
     # print(f" last user {json.dumps(last_user, indent=2, ensure_ascii=False)}")
 
-# update_user_list()
+# create_user_list()
