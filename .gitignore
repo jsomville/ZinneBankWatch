@@ -145,3 +145,4 @@ bank_watch.log
 last_processed_transaction_id.txt
 data*
 log*
+last_check.json

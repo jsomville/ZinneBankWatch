@@ -124,7 +124,7 @@ def get_bank_account_summary(bank_accounts_detail):
             })
             
         log_this("info", f"Retrieved {len(summary)} bank accounts")
-        log_this("info", f"Bank Accounts Details {json.dumps(summary, indent=2)}")
+        log_this("info", f"Retrieved = {json.dumps(summary, indent=2)}")
         return summary
     except Exception as error:
         message = json.dumps({
@@ -193,6 +193,24 @@ def get_account_id(account_list, iban):
         log_this("error", f"Error finding account ID:: {message}")
         raise
 
+def get_account_detail_by_IBAN(account_list, iban):
+    """Get account ID from bank details using IBAN"""
+    log_this("info", f"Finding account ID for IBAN {iban}...")
+    try:
+        for account in account_list:
+            if account.get("iban") == iban:
+                if debug_this:
+                    print(f"Found account ID: {account.get('id')}")
+                return account
+            
+        raise ValueError(f"No account found with IBAN {iban}")
+    except Exception as error:
+        message = json.dumps({
+            "error": str(error),
+            "traceback": traceback.format_exc().splitlines()
+        }, indent=2)
+        log_this("error", f"Error finding account ID:: {message}")
+        raise
 
 
 def main():

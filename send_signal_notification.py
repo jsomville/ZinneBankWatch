@@ -8,7 +8,7 @@ load_dotenv()
 API_URL = os.getenv("SIGNAL_URL")
 SENDER_NUMBER = os.getenv("SIGNAL_SOURCE_NUMBER")
 
-def send_signal_message(sender_number, recipients, api_url, message, timeout=10):
+def send_signal_message(recipients, message, timeout=10):
     """Send a message using the Signal REST API."""
 
     url = f"{API_URL.rstrip('/')}/v2/send"
