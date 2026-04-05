@@ -211,6 +211,9 @@ def create_user_list():
             log_this("error", f"Error getting account info for user {user.get('id')}: {message}")
 
     # Save file to disk
+    save_user_list(user_list)
+
+def save_user_list(user_list):
     try:
         with open(user_file_path, "w") as f:
             json.dump(user_list, f, indent=2, ensure_ascii=False)
@@ -242,16 +245,28 @@ def get_user_info_from_account(account):
         if user["account_number"] == account:
             return user
 
-    #User not found check if e need to update the list
+    #User not found check if need to update the list
     data = get_all_users()
     if len(data) != len(global_user_list):
-        log_this("info", "User list is outdated, updating user list")
+        log_this("info", "Updating user list")
         
         # Search for the account number again
+        user_added = False
         for user in data:
             #Is the user in the global list
-            user_in_global_list = next((u for u in global_user_list if u["id
-            if user["email"] == account:
+            user_in_global_list = get_user_info_from_email(user["email"])
+            if not user_in_global_list:
+                log_this("info", f"New user found {user['email']}, updating user list")
+                
+                user_detail = get_user_details(user)
+                global_user_list.append(user_detail)
+                user_added = True
+
+                if user_detail["account_number"] == account:
+                    return user_detail
+                
+        if user_added:
+            save_user_list(global_user_list)
     
     return None
 
