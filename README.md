@@ -15,6 +15,11 @@ Note:
 TO CHECK:
   - Transaction order is wrong --> we might need to invert it to process older transaction first and then the newest
 
+## Pre-requisite
+You need the following: 
+ - a valid integration linked with a bank account in my punto (https://dashboard.myponto.com/sign-in)
+ - a valid api key for a cyclos system
+
 ## create a virtual env
 
 ```bash
