@@ -107,10 +107,10 @@ def manage_transactions(access_token, account):
         send_notification(msg)
             
     else:
-        log_this("info", "No new transactions to process")
+        msg = "No new transactions to process"
+        log_this("info", msg)
         
         #Send notification - No new transactions to process
-        msg = "No new transactions to process"
         send_notification(msg)
 
 
@@ -221,11 +221,10 @@ def main():
                     manage_transactions(access_token, account)
                 
                 else:
-                    msg_log = "No account balance change since last check"
-                    log_this("info", msg_log)
+                    msg = "Account balance has not changed"
+                    log_this("info", msg)
                     
                     #Send notification - Nothing to do
-                    msg = msg_log + "\nNothing to do..."
                     send_notification(msg)
 
             else:

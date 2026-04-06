@@ -17,7 +17,7 @@ TO CHECK:
 
 ## create a virtual env
 
-```back
+```bash
   python3 -m venv .venv
   source .venv/bin/activate
   pip install -r requirements.txt
@@ -37,10 +37,18 @@ CURRENCY="YOUR_CURRENCY"
 
 LAST_DAYS_TO_CHECK = 1
 
+ENVIRONEMENT="TST" 
+
+IDENTIFIER="Zinne_BOT"
+
 SPE_URL="https:URL"
 SPE_ACCESS_KEY="YOUR_API_KEY"
 
 SIGNAL_URL="http:URL"
 SIGNAL_SOURCE_NUMBER="+32123456789"
 SIGNAL_DESTINATION_GROUP="group.KEY"
+```
+## To run
+```bash
+  python check_topoff.py
 ```
