@@ -320,9 +320,9 @@ def process_payment(production_flag, unique_number, amount, account_number, tran
 def get_unprocessed_reason(string):
     reason = "unknown"
     if "reftranseuro" in string and "transaction euro must be unique" in string:
-        reason = "Ref Trans Euro must be unique"
+        reason = "RefTransEuro must be unique"
     elif "No user found for account number" in string:
-        reason = string
+        reason = "No User found"
     return reason
 
 def test_transaction():
