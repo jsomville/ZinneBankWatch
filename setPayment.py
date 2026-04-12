@@ -10,11 +10,15 @@ from logger import log_this, config_logging
 
 load_dotenv()
 
-user_file_path = "user_list.json"
-debug_this = False
+DATA_FOLDER = "data"
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
+    
+USER_FILE = os.path.join(DATA_FOLDER, "user_list.json")
 
 global_user_list = []
 
+debug_this = False
 
 def make_payment(destination, amount, description, transeuro, account_type):
     """Make a payment to the destination email with the specified amount and description"""
@@ -215,7 +219,7 @@ def create_user_list():
 
 def save_user_list(user_list):
     try:
-        with open(user_file_path, "w") as f:
+        with open(USER_FILE, "w") as f:
             json.dump(user_list, f, indent=2, ensure_ascii=False)
     except Exception as error:       
         message = json.dumps({
@@ -232,12 +236,12 @@ def get_user_info_from_account(account):
         log_this("info", "Loading user list from file")
 
         # Checks if file exists, if not update the user list and save file
-        if not os.path.exists(user_file_path):
+        if not os.path.exists(USER_FILE):
             log_this("info", "File not found, creating user file this will take some time")
             create_user_list()
 
         # Open file & Load File
-        with open(user_file_path, "r") as f:
+        with open(USER_FILE, "r") as f:
             global_user_list = json.load(f)
 
     # Search for the account number
