@@ -8,20 +8,27 @@ from datetime import date, datetime, timedelta, timezone
 load_dotenv()
 
 debug_this = False
-debug_transactions = False
 
-def filter_transactions(transactions, date_from):
+def filter_transactions(transactions, processed_transactions, date_from):
     """Process transactions and extract relevant information"""
     try:
         processed = []
         counter = 0
         for transaction in transactions.get("data", []):
             
+            #Filter out already processed transactions
+            if processed_transactions is not None:
+                if any(pt.get("id") == transaction.get("id") for pt in processed_transactions):
+                    if debug_this:
+                        print(f"Skipping already processed transaction: {transaction.get('id')}")
+                    continue
+            
+            #Filter transaction based on date and filter
             processed_transaction = filter_transaction(transaction, date_from)
             if processed_transaction["status"] == "success":
                 processed.append(processed_transaction)
                 
-            if debug_transactions:
+            if debug_this:
                 print(f"Processed transaction: {json.dumps(processed_transaction, indent=2)}")
                 
             counter += 1

@@ -27,6 +27,9 @@ if not os.path.exists(DATA_FOLDER):
 
 LAST_CHECK_FILE = os.path.join(DATA_FOLDER, "last_check.json")
 
+TRANSACTIONS_CHECK_FILE = os.path.join(DATA_FOLDER, "transactions.json")
+
+TRANSACTION_DAYS_TO_KEEP = 90
 
 def save_last_check(account_details):
     """Save the last check information to a file"""
@@ -49,6 +52,38 @@ def load_last_check():
             return data
     return None
 
+def save_transactions(transactions):
+    """Save the transactions to a file"""
+    
+    #Cleanup older transactions, to avoid keeping too much data in the file
+    if transactions is not None:
+        transactions = [t for t in transactions if datetime.fromisoformat(t["date"]).date() > datetime.now().date() - timedelta(days=TRANSACTION_DAYS_TO_KEEP)]
+        
+    #Save Transactions to file
+    with open(TRANSACTIONS_CHECK_FILE, "w") as f:
+        json.dump(transactions, f, indent=2, ensure_ascii=False)
+
+
+def load_transactions():
+    """Load the transactions from the file and return it as a list, or return None if the file does not exist"""
+    if os.path.exists(TRANSACTIONS_CHECK_FILE):
+        with open(TRANSACTIONS_CHECK_FILE, "r") as f:
+            data = json.load(f)
+            return data
+    return None
+
+def save_transactions_history(transactions):
+    """Save transactions to a file"""
+    
+    path = os.path.join(DATA_FOLDER, "transactions_history")
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    date_formatted = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    user_file_path = os.path.join(path, f"{date_formatted}.json")
+    with open(user_file_path, "w") as f:
+        json.dump(transactions, f, indent=2, ensure_ascii=False)
+
 
 def manage_transactions(access_token, account):
     """Get the transactions for the account, filter them by date and process them"""
@@ -56,8 +91,11 @@ def manage_transactions(access_token, account):
     # get the transactions for the account
     raw_transactions_list = call_account_transactions(access_token, account.get("id"))
 
+    # Load previously processed transactions
+    processed_transactions = load_transactions()
+
     # Filter transaction by date
-    transactions_list = filter_transactions(raw_transactions_list, FILTER_DATE)
+    transactions_list = filter_transactions(raw_transactions_list, processed_transactions, FILTER_DATE)
 
     # Handle transactions
     if len(transactions_list) > 0:
@@ -85,14 +123,21 @@ def manage_transactions(access_token, account):
                 succeded_msg += (
                     f" - {transaction['description']}/{transaction['amount']}\n"
                 )
+                
             except Exception as error:
                 transaction["status"] = "unprocessed"
                 transaction["reason"] = get_unprocessed_reason(str(error))
                 failed_count += 1
                 failed_msg += f" - {transaction['description']}/{transaction['amount']}: {transaction['reason']}\n"
+            
+            #Add to the list of processed transactions
+            if processed_transactions is None:
+                processed_transactions = []
+            processed_transactions.append(transaction)
 
         # Save the transactions to a file
-        save_transactions(transactions_list)
+        save_transactions_history(transactions_list)
+        save_transactions(processed_transactions)
 
         msg = ""
         if failed_count == 0:
@@ -133,23 +178,15 @@ def manage_transactions(access_token, account):
     else:
         msg = "No new transactions to process"
         log_this("info", msg)
+        
+        #Save the transaction history, is null
+        save_transactions_history(None)
+        
+        #Save the processed transactions
+        save_transactions(processed_transactions)
 
         # Send notification - No new transactions to process
         send_notification(msg)
-
-
-def save_transactions(transactions):
-    """Save transactions to a file"""
-
-    path = "transactions_history"
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-    date_formatted = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    user_file_path = os.path.join(path, f"{date_formatted}.json")
-    with open(user_file_path, "w") as f:
-        json.dump(transactions, f, indent=2, ensure_ascii=False)
-
 
 def send_check_notification(transactions, balance):
     """Send a notification to the signal group with the number of transactions processed and the current balance"""
@@ -240,25 +277,8 @@ def main():
                 log_this("error", f"Account with IBAN {iban_ref} not found")
                 raise ValueError(f"Account with IBAN {iban_ref} not found")
 
-            # Check for the last synchronisation
-            current_balance = account.get("currentBalance")
-            last_check = load_last_check()
-            if last_check:
-                if last_check.get("currentBalance") != current_balance:
-                    # Check if the balance has changed since the last check
-                    manage_transactions(access_token, account)
-
-                else:
-                    msg = "Account balance has not changed"
-                    log_this("info", msg)
-
-                    # Send notification - Nothing to do
-                    send_notification(msg)
-
-            else:
-                log_this("info", "No previous check found, this is the first check")
-
-                manage_transactions(access_token, account)
+            # Manage Transactions
+            manage_transactions(access_token, account)
 
             # Save the last Check Informations
             save_last_check(account)
