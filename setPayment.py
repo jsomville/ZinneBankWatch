@@ -45,36 +45,30 @@ def get_account_type(account_information):
 
     return account_type
 
-def map_user_details(user):
+def map_user_details(user_info):
     """Get the user details including email, account number and account type"""
-    user_id = user.get("id")
     account_number = ""
-    email = ""
     account_type = ""
 
-    detail_user = get_user_info(user_id)
-    if detail_user:
-        email = detail_user.get("email")
+    permissions = user_info.get("permissions")
+    if permissions:
+        accounts = permissions.get("accounts")
+        if accounts:
+            account = accounts[0] if accounts else None
+            account_number = account.get("number") if account else None
 
-        permissions = detail_user.get("permissions")
-        if permissions:
-            accounts = permissions.get("accounts")
-            if accounts:
-                account = accounts[0] if accounts else None
-                account_number = account.get("number") if account else None
-
-        account_type = get_account_type(detail_user) if detail_user else None
+    account_type = get_account_type(user_info) if user_info else None
 
     user_detail = {
-        "id": user_id,
-        "display": user["display"],
-        "email": email,
+        "id": user_info.get("id"),
+        "display": user_info.get("display"),
+        "email": user_info.get("email"),
         "account_number": account_number,
         "account_type": account_type,
     }
 
     if debug_this:
-        print(f"User {user_id} has {json.dumps(user_detail, indent=2)}")
+        print(f"User {user_info.get('id')} has {json.dumps(user_detail, indent=2)}")
 
     return user_detail
 
@@ -91,7 +85,9 @@ def create_user_list():
     for user in data:
         try:
             
-            user_detail = map_user_details(user)
+            user_info = get_user_info(user.get("id"))
+            
+            user_detail = map_user_details(user_info)
 
             user_list.append(user_detail)
 
@@ -141,26 +137,33 @@ def find_user_info_from_account(account_number: str):
 
     #User not found check if need to update the list
     data = get_all_users()
+    print(f"Number of users in global list {len(global_user_list)}, number of users retrieved from API {len(data)}")
+        
     new_user = None
     if len(data) != len(global_user_list):
         log_this("info", "Updating user list")
         
         # Search for the account number again
-        user_added = False
+        user_added = 0
         for user in data:
             #Is the user in the global list
-            user_in_global_list = find_user_info_from_email(user["email"])
+            user_id = user.get("id")
+            user_in_global_list = find_user_info_from_id(user_id)
             if not user_in_global_list:
-                log_this("info", f"New user found {user['email']}, updating user list")
+                log_this("info", f"New user found {user_id}")
                 
-                user_detail = map_user_details(user)
+                user_info = get_user_info(user_id)
+                
+                user_detail = map_user_details(user_info)
+                
                 global_user_list.append(user_detail)
-                user_added = True
+                user_added += 1
 
                 if user_detail["account_number"] == account_number:
                     new_user = user_detail
                 
-        if user_added:
+        if user_added > 0:
+            log_this("info", f"{user_added} new users added to the list, saving file")
             save_user_list(global_user_list)
     
     return new_user
@@ -170,6 +173,15 @@ def find_user_info_from_email(email: str):
     
     for user in global_user_list:
         if user["email"] == email:
+            return user
+
+    return None
+
+def find_user_info_from_id(user_id: str):
+    global global_user_list
+    
+    for user in global_user_list:
+        if user["id"] == user_id:
             return user
 
     return None
@@ -256,8 +268,6 @@ def test_transaction():
         log_this("error", f"Error in payment: {message}")
         
 def test_user_list():
-    
-    debug_this = True
     
     account_number="999-9511-35955" #This should be a newly created user...
 
