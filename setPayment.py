@@ -1,12 +1,12 @@
-from datetime import date, datetime
+from datetime import datetime
 import os
 import json
 import traceback
-from urllib.parse import quote
-import requests
 import uuid
 from dotenv import load_dotenv
 from logger import log_this, config_logging
+
+from spe import make_payment, get_user_info, get_all_users
 
 load_dotenv()
 
@@ -19,85 +19,6 @@ USER_FILE = os.path.join(DATA_FOLDER, "user_list.json")
 global_user_list = []
 
 debug_this = False
-
-def make_payment(destination, amount, description, transeuro, account_type):
-    """Make a payment to the destination email with the specified amount and description"""
-
-    if debug_this:
-        print(f" Make Payment to {destination} for {amount}")
-
-    access_token = os.getenv("SPE_ACCESS_KEY")
-    spe_url = os.getenv("SPE_URL")
-    currency = os.getenv("CURRENCY")
-
-    headers = {
-        "accept": "application/json",
-        "Access-Client-Token": access_token,
-        "Content-Type": "application/json",
-    }
-
-    url = f"{spe_url}{currency}/api/system/payments"
-
-    response = requests.post(
-        url,
-        headers=headers,
-        data=json.dumps(
-            {
-                "amount": amount,
-                "description": description,
-                "currency": currency,
-                "type": account_type,
-                "customValues": {
-                    "sourceEuro": "virementBancaire",
-                    "reftranseuro": transeuro,
-                },
-                "subject": destination,
-            }
-        ),
-    )
-
-    if response.status_code != 201:
-        raise Exception(
-            f"Payment failed: {response.status_code} {json.dumps(response.text)}"
-        )
-
-    data = response.json()
-
-    if debug_this:
-        print("Payment", json.dumps(data, indent=2))
-
-
-def get_user_info(user):
-    """Get user information by user id"""
-    if debug_this:
-        print("Retrieve user info for", user)
-
-    access_token = os.getenv("SPE_ACCESS_KEY")
-    spe_url = os.getenv("SPE_URL")
-    currency = os.getenv("CURRENCY")
-
-    headers = {
-        "accept": "application/json",
-        "Access-Client-Token": access_token,
-        "Content-Type": "application/json",
-    }
-
-    # URL-encode the user identifier to handle special characters like dashes
-    url = f"{spe_url}{currency}/api/users/{user}"
-    response = requests.get(url, headers=headers)
-
-    if response.status_code != 200:
-        raise Exception(
-            f"Failed to get user info: {response.status_code} {json.dumps(response.text)}"
-        )
-
-    data = response.json()
-
-    if debug_this:
-        print("User info", json.dumps(data, indent=2))
-
-    return data
-
 
 def get_account_type(account_information):
     """Get the account type based on the internalName of the group the user is in"""
@@ -124,41 +45,8 @@ def get_account_type(account_information):
 
     return account_type
 
-
-def get_all_users():
-
-    access_token = os.getenv("SPE_ACCESS_KEY")
-    spe_url = os.getenv("SPE_URL")
-    currency = os.getenv("CURRENCY")
-
-    headers = {
-        "accept": "application/json",
-        "Access-Client-Token": access_token,
-        "Content-Type": "application/json",
-    }
-
-    url = f"{spe_url}{currency}/api/users"
-    response = requests.get(
-        url, headers=headers, params={"groups": "AParticuliers", "pageSize": 2000}
-    )
-
-    if response.status_code != 200:
-        raise Exception(
-            f"Failed to search user: {response.status_code} {json.dumps(response.text)}"
-        )
-
-    data = response.json()
-
-    if debug_this:
-        print(
-            f"Users retrieved successfully {json.dumps(data, indent=2, ensure_ascii=False )}"
-        )
-
-    return data
-
-
-def get_user_details(user):
-
+def map_user_details(user):
+    """Get the user details including email, account number and account type"""
     user_id = user.get("id")
     account_number = ""
     email = ""
@@ -203,7 +91,7 @@ def create_user_list():
     for user in data:
         try:
             
-            user_detail = get_user_details(user)
+            user_detail = map_user_details(user)
 
             user_list.append(user_detail)
 
@@ -229,9 +117,10 @@ def save_user_list(user_list):
         log_this("error", f"Error saving user list to file: {message}")
         raise
 
-def get_user_info_from_account(account):
+def find_user_info_from_account(account_number: str):
     global global_user_list
 
+    #Check if local list is empty, if yes load from file
     if len(global_user_list) == 0:
         log_this("info", "Loading user list from file")
 
@@ -246,11 +135,13 @@ def get_user_info_from_account(account):
 
     # Search for the account number
     for user in global_user_list:
-        if user["account_number"] == account:
+        if user["account_number"] == account_number:
+            #If account match return user info
             return user
 
     #User not found check if need to update the list
     data = get_all_users()
+    new_user = None
     if len(data) != len(global_user_list):
         log_this("info", "Updating user list")
         
@@ -258,23 +149,23 @@ def get_user_info_from_account(account):
         user_added = False
         for user in data:
             #Is the user in the global list
-            user_in_global_list = get_user_info_from_email(user["email"])
+            user_in_global_list = find_user_info_from_email(user["email"])
             if not user_in_global_list:
                 log_this("info", f"New user found {user['email']}, updating user list")
                 
-                user_detail = get_user_details(user)
+                user_detail = map_user_details(user)
                 global_user_list.append(user_detail)
                 user_added = True
 
-                if user_detail["account_number"] == account:
-                    return user_detail
+                if user_detail["account_number"] == account_number:
+                    new_user = user_detail
                 
         if user_added:
             save_user_list(global_user_list)
     
-    return None
+    return new_user
 
-def get_user_info_from_email(email):
+def find_user_info_from_email(email: str):
     global global_user_list
     
     for user in global_user_list:
@@ -283,12 +174,12 @@ def get_user_info_from_email(email):
 
     return None
 
-def process_payment(production_flag, unique_number, amount, account_number, transaction_dateTime):
+def process_payment(production_flag: bool, unique_number: str, amount: float, account_number: str, transaction_dateTime: datetime):
     try:
 
         log_this("info", f"Processing payment {unique_number} for account {account_number} with amount {amount}")
 
-        user_info = get_user_info_from_account(account_number)
+        user_info = find_user_info_from_account(account_number)
         if not user_info:
             raise Exception(f"No user found for account number {account_number}")
 
@@ -321,11 +212,11 @@ def process_payment(production_flag, unique_number, amount, account_number, tran
         log_this("error", f"Error processing payment: {message}")
         raise
 
-def get_unprocessed_reason(string):
+def get_unprocessed_reason(reason_string: str):
     reason = "unknown"
-    if "reftranseuro" in string and "transaction euro must be unique" in string:
+    if "reftranseuro" in reason_string and "transaction euro must be unique" in reason_string:
         reason = "RefTransEuro must be unique"
-    elif "No user found for account number" in string:
+    elif "No user found for account number" in reason_string:
         reason = "No User found"
     return reason
 
@@ -363,21 +254,23 @@ def test_transaction():
             "traceback": traceback.format_exc().splitlines()
         }, indent=2)
         log_this("error", f"Error in payment: {message}")
+        
+def test_user_list():
+    
+    debug_this = True
+    
+    account_number="999-9511-35955" #This should be a newly created user...
+
+    user = find_user_info_from_account(account_number)
+    
+    print(f"User info for account {account_number} is {json.dumps(user, indent=2)}")
+            
 
 if __name__ == "__main__":
 
     config_logging()
 
-    test_transaction()
+    test_user_list()
 
-    # user = get_user_info("543310456861094502")
-    # print(f"Users retrieved successfully {json.dumps(user, indent=2)}")
 
-    # data = get_all_users()
-
-    # print(f"Users retrieved successfully {len(data)} users found")
-
-    # last_user = data[-1:]
-    # print(f" last user {json.dumps(last_user, indent=2, ensure_ascii=False)}")
-
-# create_user_list()
+    #create_user_list()
