@@ -212,9 +212,11 @@ def process_payment(production_flag: bool, unique_number: str, amount: float, ac
         
         log_this("info", f"Processing payment {unique_number} transeuro {transeuro}")
 
-        make_payment(destination, amount, description, transeuro, account_type)
+        #make_payment(destination, amount, description, transeuro, account_type)
 
         log_this("info", "Payment completed successfully")
+        
+        return transeuro
 
     except Exception as error:    
         message = json.dumps({

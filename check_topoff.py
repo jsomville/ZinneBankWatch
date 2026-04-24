@@ -123,7 +123,7 @@ def manage_transactions(access_token, account):
                 print(f"Processing transaction {json.dumps(transaction, indent=2)}")
 
             try:
-                process_payment(
+                transeuro = process_payment(
                     production_flag=True,
                     unique_number=transaction["id"],
                     amount=transaction["amount"],
@@ -132,9 +132,8 @@ def manage_transactions(access_token, account):
                 )
                 transaction["status"] = "processed"
                 succeded_count += 1
-                succeded_msg += (
-                    f" - {transaction['description']}/{transaction['amount']}\n"
-                )
+                succeded_msg += f" - {transeuro}\n"
+
 
             except Exception as error:
                 transaction["status"] = "unprocessed"
@@ -281,7 +280,7 @@ def get_today_check_folder():
     return folder
 
 
-def make_daily_summary(datetime, last_check):
+def make_daily_summary(datetime, balance):
     """Make a daily summary of the transactions and send a notification"""
 
     # Get the transactions history for today
@@ -296,9 +295,6 @@ def make_daily_summary(datetime, last_check):
                     data = json.load(f)
                     if data is not None:
                         transactions_history.extend(data)
-
-    # Get the current balance from the last check
-    balance = last_check.get("currentBalance") if last_check else "N/A"
     
     #Get the number of processed and unprocessed transactions
     succesed_count = len([t for t in transactions_history if t.get("status") == "processed"])
@@ -308,7 +304,7 @@ def make_daily_summary(datetime, last_check):
     msg = f"Daily summary for {datetime.strftime('%Y-%m-%d')}:\n Checks Performed: {filecount}\n Transactions: {len(transactions_history)}\n Processed transactions: {succesed_count}\n Unprocessed transactions: {unprocessed_count}\n Current balance: {balance}"
     send_notification(msg)
 
-def make_weekly_summary(datetime, last_check):
+def make_weekly_summary(datetime, balance):
     """Make a weekly summary of the transactions and send a notification"""
     # This function can be implemented in the future to provide a weekly summary of the transactions and the account balance.
     first_day_of_week = datetime - timedelta(days=7)
@@ -325,9 +321,6 @@ def make_weekly_summary(datetime, last_check):
                         data = json.load(f)
                         if data is not None:
                             transactions_history.extend(data)
-    
-    #get the current balance from the last check
-    balance = last_check.get("currentBalance") if last_check else "N/A"
     
     #Get the number of processed and unprocessed transactions
     succesed_count = len([t for t in transactions_history if t.get("status") == "processed"])
@@ -377,12 +370,13 @@ def main():
                 last_check_date = datetime.fromisoformat(last_check.get("last_check"))
                 if last_check_date.date() != datetime.now().date():
                     #This is a new day
+                    new_balance = account.get("currentBalance") if account else "N/A"
                     
                     #Check if today is a sunday, if yes make a weekly summary, if not make a daily summary
                     if datetime.now().weekday() == 6:  # Sunday
-                        make_weekly_summary(datetime.now(), last_check)
+                        make_weekly_summary(datetime.now(), new_balance)
                     else:
-                        make_daily_summary(last_check_date.date(), last_check)
+                        make_daily_summary(last_check_date.date(), new_balance)
 
             # Save the last Check Informations
             save_last_check(account)
