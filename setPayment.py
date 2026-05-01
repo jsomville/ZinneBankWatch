@@ -186,7 +186,7 @@ def find_user_info_from_id(user_id: str):
 
     return None
 
-def process_payment(production_flag: bool, unique_number: str, amount: float, account_number: str, transaction_dateTime: datetime):
+def process_payment(unique_number: str, amount: float, account_number: str, transeuro: str):
     try:
 
         log_this("info", f"Processing payment {unique_number} for account {account_number} with amount {amount}")
@@ -197,22 +197,9 @@ def process_payment(production_flag: bool, unique_number: str, amount: float, ac
 
         destination = user_info["email"]
         account_type = user_info["account_type"]
-
-        # Current Transeuro format takes only date --> bugs if 2 deposit of same amount on same day
-        transeuro = (
-            f"{transaction_dateTime.strftime('%Y-%m-%d')}/{account_number}/{amount:.2f}"
-        )
-        if not production_flag:
-            prefix = str(unique_number)[
-                :8
-            ]  # Use the first 8 characters of the UUID for uniqueness
-            transeuro = f"Test - {prefix} - {transaction_dateTime.strftime('%Y-%m-%d')}/{account_number}/{amount:.2f}"
-
         description = transeuro
-        
-        log_this("info", f"Processing payment {unique_number} transeuro {transeuro}")
 
-        make_payment(destination, amount, description, transeuro, account_type)
+        #make_payment(destination, amount, description, transeuro, account_type)
 
         log_this("info", "Payment completed successfully")
         
@@ -225,6 +212,7 @@ def process_payment(production_flag: bool, unique_number: str, amount: float, ac
         }, indent=2)
         log_this("error", f"Error processing payment: {message}")
         raise
+    
 
 def get_unprocessed_reason(reason_string: str):
     reason = "unknown"
@@ -233,41 +221,6 @@ def get_unprocessed_reason(reason_string: str):
     elif "No user found for account number" in reason_string:
         reason = "No User found"
     return reason
-
-def test_transaction():
-    try:
-        log_this("info", "Begin Testing transactions processing")
-
-        amount = 1.01
-        account_number = "114-8844-79676"
-        unique_id = uuid.uuid4()
-        process_payment(False, unique_id, amount, account_number, datetime.now())
-
-        # ************
-        amount = 0.99
-        account_number = "114-8844-79676"
-        unique_id = uuid.uuid4()
-        process_payment(False, unique_id, amount, account_number, datetime.now())
-
-        # ************
-        amount = 0.1
-        account_number = "114-8844-79676"
-        unique_id = uuid.uuid4()
-        process_payment(False, unique_id, amount, account_number, datetime.now())
-
-        # ************
-        amount = 100
-        account_number = "114-8844-79676"
-        unique_id = uuid.uuid4()
-        process_payment(False, unique_id, amount, account_number, datetime.now())
-
-        log_this("info", "Testing transactions completed")
-    except Exception as error:
-        message = json.dumps({
-            "error": str(error),
-            "traceback": traceback.format_exc().splitlines()
-        }, indent=2)
-        log_this("error", f"Error in payment: {message}")
         
 def test_user_list():
     

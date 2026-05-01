@@ -14,92 +14,36 @@ from transaction_filter import filter_transactions
 from setPayment import get_unprocessed_reason, process_payment
 from logger import log_this, config_logging
 from send_signal_notification import send_signal_message
+from transaction_helper import (
+    get_account_from_description,
+    get_trans_euro,
+    is_valid_description,
+)
+
+from file_helper import (
+    get_daily_summary,
+    get_weekly_summary,
+    load_last_check,
+    save_last_check,
+    save_transactions,
+    load_transactions,
+    save_transactions_history,
+    check_for_check_folder,
+)
 
 debug_this = False
 
 LAST_DAY_TO_CHECK = int(os.getenv("LAST_DAYS_TO_CHECK", 1))
 FILTER_DATE = datetime.now() - timedelta(days=LAST_DAY_TO_CHECK)
-print(f"Filtering transactions from {FILTER_DATE.isoformat()}")
 
-DATA_FOLDER = "data"
-if not os.path.exists(DATA_FOLDER):
-    os.makedirs(DATA_FOLDER)
-
-DATA_CHECK_FOLDER = os.path.join(DATA_FOLDER, "checks")
-if not os.path.exists(DATA_CHECK_FOLDER):
-    os.makedirs(DATA_CHECK_FOLDER)
-
-LAST_CHECK_FILE = os.path.join(DATA_FOLDER, "last_check.json")
-
-TRANSACTIONS_CHECK_FILE = os.path.join(DATA_FOLDER, "transactions.json")
-
-TRANSACTION_DAYS_TO_KEEP = 90
-
-
-def save_last_check(account_details):
-    """Save the last check information to a file"""
-    data = {
-        "availableBalance": account_details.get("availableBalance"),
-        "currentBalance": account_details.get("currentBalance"),
-        "account_number": account_details.get("iban"),
-        "last_check": datetime.now().isoformat(),
-    }
-
-    with open(LAST_CHECK_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def load_last_check():
-    """Load the last check information from the file and return it as a dictionary, or return None if the file does not exist"""
-    if os.path.exists(LAST_CHECK_FILE):
-        with open(LAST_CHECK_FILE, "r") as f:
-            data = json.load(f)
-            return data
-    return None
-
-
-def save_transactions(transactions):
-    """Save the transactions to a file"""
-
-    # Cleanup older transactions, to avoid keeping too much data in the file
-    if transactions is not None:
-        transactions = [
-            t
-            for t in transactions
-            if datetime.fromisoformat(t["date"]).date()
-            > datetime.now().date() - timedelta(days=TRANSACTION_DAYS_TO_KEEP)
-        ]
-
-    # Save Transactions to file
-    with open(TRANSACTIONS_CHECK_FILE, "w") as f:
-        json.dump(transactions, f, indent=2, ensure_ascii=False)
-
-
-def load_transactions():
-    """Load the transactions from the file and return it as a list, or return None if the file does not exist"""
-    if os.path.exists(TRANSACTIONS_CHECK_FILE):
-        with open(TRANSACTIONS_CHECK_FILE, "r") as f:
-            data = json.load(f)
-            return data
-    return None
-
-
-def save_transactions_history(transactions):
-    """Save transactions to a file"""
-
-    path = check_for_check_folder()
-
-    date_formatted = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    user_file_path = os.path.join(path, f"{date_formatted}.json")
-    with open(user_file_path, "w") as f:
-        json.dump(transactions, f, indent=2, ensure_ascii=False)
-
+WEEK_DAY_TO_SEND_SUMMARY = 4  # 0: Monday, 1: Tuesday, 2: Wednesday, 3: Thursday, 4: Friday, 5: Saturday, 6: Sunday
 
 def manage_transactions(access_token, account):
     """Get the transactions for the account, filter them by date and process them"""
 
     # get the transactions for the account
-    raw_transactions_list = call_account_transactions(access_token, account.get("id"))
+    data = call_account_transactions(access_token, account.get("id"))
+    raw_transactions_list = data.get("data", [])
 
     # Load previously processed transactions
     processed_transactions = load_transactions()
@@ -108,6 +52,8 @@ def manage_transactions(access_token, account):
     transactions_list = filter_transactions(
         raw_transactions_list, processed_transactions, FILTER_DATE
     )
+
+    production_flag = False
 
     # Handle transactions
     if len(transactions_list) > 0:
@@ -119,27 +65,50 @@ def manage_transactions(access_token, account):
         failed_count = 0
         failed_msg = ""
         for transaction in transactions_list:
+
             if debug_this:
                 print(f"Processing transaction {json.dumps(transaction, indent=2)}")
 
-            try:
-                transeuro = process_payment(
-                    production_flag=True,
-                    unique_number=transaction["id"],
-                    amount=transaction["amount"],
-                    account_number=transaction["description"],
-                    transaction_dateTime=datetime.fromisoformat(transaction["date"]),
-                )
-                transaction["status"] = "processed"
-                succeded_count += 1
-                succeded_msg += f" - {transeuro}\n"
-
-
-            except Exception as error:
+            is_valid = is_valid_description(transaction["description"])
+            if not is_valid:
+                # We cannot extract a valid account number from the description, we consider this transaction as unprocessed and we add a reason to it
                 transaction["status"] = "unprocessed"
-                transaction["reason"] = get_unprocessed_reason(str(error))
+                transaction["reason"] = (
+                    "Invalid description, cannot extract account number"
+                )
                 failed_count += 1
-                failed_msg += f" - {transaction['description']}/{transaction['amount']}: {transaction['reason']}\n"
+                failed_msg += (
+                    f" - {transaction['reason']} - {transaction['description']}\n"
+                )
+            else:
+
+                # Normalize the description to extract the account number
+                account_number = get_account_from_description(
+                    transaction["description"]
+                )
+
+                # Normalize the description to extract the euro amount
+                transaction["description"] = account_number
+
+                # Get the unique key to validate
+                transeuro = get_trans_euro(transaction)
+
+                try:
+                    process_payment(
+                        unique_number=transaction["id"],
+                        amount=transaction["amount"],
+                        account_number=account_number,
+                        transeuro=transeuro,
+                    )
+                    transaction["status"] = "processed"
+                    succeded_count += 1
+                    succeded_msg += f" - {transeuro}\n"
+
+                except Exception as error:
+                    transaction["status"] = "unprocessed"
+                    transaction["reason"] = get_unprocessed_reason(str(error))
+                    failed_count += 1
+                    failed_msg += f" - {transeuro} : {transaction['reason']}\n"
 
             # Add to the list of processed transactions
             if processed_transactions is None:
@@ -197,7 +166,7 @@ def manage_transactions(access_token, account):
         save_transactions(processed_transactions)
 
         # Send notification - No new transactions to process
-        send_notification(msg)
+        #send_notification(msg)
 
 
 def send_check_notification(transactions, balance):
@@ -254,7 +223,7 @@ def check_authorisation_expiration(account_info):
 
     expiration = account_info.get("authorizationExpirationExpectedAt")
     expirationDate = datetime.fromisoformat(expiration)
-    if expirationDate < datetime.now(timezone.utc) + timedelta(days=10):
+    if expirationDate < datetime.now(timezone.utc) + timedelta(days=15):
         msg = f"Authorization is expiring soon on {expirationDate.isoformat()}"
         log_this("warning", msg)
 
@@ -262,75 +231,21 @@ def check_authorisation_expiration(account_info):
         send_notification(msg)
 
 
-def check_for_check_folder():
-    """Check if the check folder exists for the current day, create it if it doesn't"""
-
-    folder = get_today_check_folder()
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-    return folder
-
-
-def get_today_check_folder():
-    """Get the check folder for the current day"""
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    folder = os.path.join(DATA_CHECK_FOLDER, today)
-    return folder
-
-
-def make_daily_summary(datetime, balance):
+def make_daily_summary(balance: float):
     """Make a daily summary of the transactions and send a notification"""
-
-    # Get the transactions history for today
-    folder = os.path.join(DATA_CHECK_FOLDER, datetime.strftime("%Y-%m-%d"))
-    transactions_history = []
-    filecount = 0
-    if os.path.exists(folder):
-        for file in os.listdir(folder):
-            filecount += 1
-            if file.endswith(".json"):
-                with open(os.path.join(folder, file), "r") as f:
-                    data = json.load(f)
-                    if data is not None:
-                        transactions_history.extend(data)
+    log_this("info", "Making daily summary")
     
-    #Get the number of processed and unprocessed transactions
-    succesed_count = len([t for t in transactions_history if t.get("status") == "processed"])
-    unprocessed_count = len([t for t in transactions_history if t.get("status") == "unprocessed"])
-
-    # Send the notification with the transactions summary and the current balance
-    msg = f"Daily summary for {datetime.strftime('%Y-%m-%d')}:\n Checks Performed: {filecount}\n Transactions: {len(transactions_history)}\n Processed transactions: {succesed_count}\n Unprocessed transactions: {unprocessed_count}\n Current balance: {balance}"
+    msg = get_daily_summary(balance)
     send_notification(msg)
 
-def make_weekly_summary(datetime, balance):
-    """Make a weekly summary of the transactions and send a notification"""
-    # This function can be implemented in the future to provide a weekly summary of the transactions and the account balance.
-    first_day_of_week = datetime - timedelta(days=7)
-    filecount = 0
-    transactions_history = []
-    for i in range(7):
-        day = first_day_of_week + timedelta(days=i)
-        folder = os.path.join(DATA_CHECK_FOLDER, day.strftime("%Y-%m-%d"))
-        if os.path.exists(folder):
-            for file in os.listdir(folder):
-                if file.endswith(".json"):
-                    filecount += 1
-                    with open(os.path.join(folder, file), "r") as f:
-                        data = json.load(f)
-                        if data is not None:
-                            transactions_history.extend(data)
-    
-    #Get the number of processed and unprocessed transactions
-    succesed_count = len([t for t in transactions_history if t.get("status") == "processed"])
-    unprocessed_count = len([t for t in transactions_history if t.get("status") == "unprocessed"])
 
-    # Send the notification with the transactions summary and the current balance
-    week_number = datetime.isocalendar()[1]
-    msg = f"Weekly summary for week {week_number}\n Checks Performed: {filecount}\n Transactions: {len(transactions_history)}\n Processed transactions: {succesed_count}\n Unprocessed transactions: {unprocessed_count}\n Current balance: {balance}"
-    send_notification(msg)                       
-    
+def make_weekly_summary(balance: float):
+    """Make a weekly summary of the transactions and send a notification"""
+    log_this("info", "Making weekly summary")
+    msg = get_weekly_summary(balance)
+    send_notification(msg)
+
+
 def main():
     """Main function"""
     try:
@@ -339,9 +254,9 @@ def main():
         log_this("info", "Bank watch started")
 
         check_for_check_folder()
-        
+
         last_check = load_last_check()
-    
+
         # Get the access token for the bank API
         access_token = call_get_access_token()
         if access_token:
@@ -365,18 +280,19 @@ def main():
             # Manage Transactions
             manage_transactions(access_token, account)
 
-            #Make summary report
+            # Make summary report
             if last_check is not None:
                 last_check_date = datetime.fromisoformat(last_check.get("last_check"))
                 if last_check_date.date() != datetime.now().date():
-                    #This is a new day
+                    # This is a new day
                     new_balance = account.get("currentBalance") if account else "N/A"
-                    
-                    #Check if today is a sunday, if yes make a weekly summary, if not make a daily summary
-                    if datetime.now().weekday() == 6:  # Sunday
-                        make_weekly_summary(datetime.now(), new_balance)
-                    else:
-                        make_daily_summary(last_check_date.date(), new_balance)
+
+                    make_daily_summary(new_balance)
+
+                    # Check if today is a sunday, if yes make a weekly summary, if not make a daily summary
+                    if datetime.now().weekday() == WEEK_DAY_TO_SEND_SUMMARY: 
+                        make_weekly_summary(new_balance)
+                        
 
             # Save the last Check Informations
             save_last_check(account)

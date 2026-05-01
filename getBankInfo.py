@@ -124,7 +124,7 @@ def get_bank_account_summary(bank_accounts_detail):
             })
             
         log_this("info", f"Retrieved {len(summary)} bank accounts")
-        log_this("info", f"Retrieved = {json.dumps(summary, indent=2)}")
+        #log_this("info", f"Retrieved = {json.dumps(summary, indent=2)}")
         return summary
     except Exception as error:
         message = json.dumps({
@@ -161,6 +161,7 @@ def call_account_transactions(access_token, account_id):
         
         raw_transaction_list = data.get("data", [])
         log_this("info", f"Retrieved {len(raw_transaction_list)} transactions")
+        #log_this("info", f"Retrieved transactions = {json.dumps(raw_transaction_list, indent=2)}")
         
         if debug_this:
             print(json.dumps(data, indent=2))
