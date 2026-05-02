@@ -199,7 +199,7 @@ def process_payment(unique_number: str, amount: float, account_number: str, tran
         account_type = user_info["account_type"]
         description = transeuro
 
-        #make_payment(destination, amount, description, transeuro, account_type)
+        make_payment(destination, amount, description, transeuro, account_type)
 
         log_this("info", "Payment completed successfully")
         

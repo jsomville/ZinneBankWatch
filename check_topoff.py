@@ -36,7 +36,7 @@ debug_this = False
 LAST_DAY_TO_CHECK = int(os.getenv("LAST_DAYS_TO_CHECK", 1))
 FILTER_DATE = datetime.now() - timedelta(days=LAST_DAY_TO_CHECK)
 
-WEEK_DAY_TO_SEND_SUMMARY = 4  # 0: Monday, 1: Tuesday, 2: Wednesday, 3: Thursday, 4: Friday, 5: Saturday, 6: Sunday
+WEEK_DAY_TO_SEND_SUMMARY = 0  # 0: Monday, 1: Tuesday, 2: Wednesday, 3: Thursday, 4: Friday, 5: Saturday, 6: Sunday
 
 def manage_transactions(access_token, account):
     """Get the transactions for the account, filter them by date and process them"""
