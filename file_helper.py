@@ -99,8 +99,10 @@ def get_today_check_folder():
 
 def get_daily_summary(balance: float):
     
-    # Get the transactions history for today
-    folder = os.path.join(DATA_CHECK_FOLDER, datetime.now().strftime("%Y-%m-%d"))
+    yesterday = datetime.now() - timedelta(days=1)
+    
+    # Get the transactions history for yesterday
+    folder = os.path.join(DATA_CHECK_FOLDER, yesterday.strftime("%Y-%m-%d"))
     transactions_history = []
     filecount = 0
     if os.path.exists(folder):
@@ -117,7 +119,7 @@ def get_daily_summary(balance: float):
     unprocessed_count = len([t for t in transactions_history if t.get("status") == "unprocessed"])
 
     # Send the notification with the transactions summary and the current balance
-    msg = f"Daily summary for {datetime.now().strftime('%Y-%m-%d')}:\n Checks Performed: {filecount}\n Transactions: {len(transactions_history)}\n Processed transactions: {succesed_count}\n Unprocessed transactions: {unprocessed_count}\n Current balance: {balance}"
+    msg = f"Daily summary for {yesterday.strftime('%Y-%m-%d')}:\n Checks Performed: {filecount}\n Transactions: {len(transactions_history)}\n Processed transactions: {succesed_count}\n Unprocessed transactions: {unprocessed_count}\n Current balance: {balance}"
     
     return msg
 

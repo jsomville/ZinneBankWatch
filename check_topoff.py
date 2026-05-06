@@ -80,6 +80,8 @@ def manage_transactions(access_token, account):
                 failed_msg += (
                     f" - {transaction['reason']} - {transaction['description']}\n"
                 )
+                
+                log_this("info", f"Transaction {transaction['id']} has an invalid description, cannot extract account number")  
             else:
 
                 # Normalize the description to extract the account number
@@ -103,12 +105,15 @@ def manage_transactions(access_token, account):
                     transaction["status"] = "processed"
                     succeded_count += 1
                     succeded_msg += f" - {transeuro}\n"
+                    log_this("info", f"Transaction {transaction['id']} processed successfully")
 
                 except Exception as error:
                     transaction["status"] = "unprocessed"
                     transaction["reason"] = get_unprocessed_reason(str(error))
                     failed_count += 1
                     failed_msg += f" - {transeuro} : {transaction['reason']}\n"
+                    
+                    log_this("error", f"Error processing transaction {transaction['id']} : {transaction['reason']}")
 
             # Add to the list of processed transactions
             if processed_transactions is None:
@@ -237,6 +242,8 @@ def make_daily_summary(balance: float):
     
     msg = get_daily_summary(balance)
     send_notification(msg)
+    
+    log_this("info", "Daily summary sent")
 
 
 def make_weekly_summary(balance: float):
@@ -244,6 +251,8 @@ def make_weekly_summary(balance: float):
     log_this("info", "Making weekly summary")
     msg = get_weekly_summary(balance)
     send_notification(msg)
+    
+    log_this("info", "Weekly summary sent")
 
 
 def main():
